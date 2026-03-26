@@ -9,17 +9,34 @@ const DB_PATH = () => path.join(home(), ".local", "share", "opencode", "opencode
 // SQLite helper
 // ---------------------------------------------------------------------------
 
-async function querySqlite(dbPath: string, sql: string): Promise<unknown[]> {
-  const cmd = new Deno.Command(SQLITE3_BIN, {
-    args: ["-json", "-readonly", dbPath, `PRAGMA query_only=ON; ${sql}`],
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const { stdout, stderr, success } = await cmd.output();
-  if (!success) throw new Error(new TextDecoder().decode(stderr));
-  const text = new TextDecoder().decode(stdout).trim();
-  if (!text) return [];
-  return JSON.parse(text);
+async function querySqlite(dbPath: string, sql: string, retries = 3): Promise<unknown[]> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    // Pass pragmas without -json via stdin, then the real query
+    const fullSql = `.mode json\nPRAGMA busy_timeout=2000;\nPRAGMA query_only=ON;\n${sql}\n`;
+    const cmd = new Deno.Command(SQLITE3_BIN, {
+      args: ["-readonly", "-batch", dbPath],
+      stdin: "piped",
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const proc = cmd.spawn();
+    const writer = proc.stdin.getWriter();
+    await writer.write(new TextEncoder().encode(fullSql));
+    await writer.close();
+    const { stdout, stderr, success } = await proc.output();
+    if (success) {
+      const text = new TextDecoder().decode(stdout).trim();
+      if (!text) return [];
+      // Find the last JSON array in output (skip pragma output lines)
+      const jsonStart = text.lastIndexOf("[");
+      if (jsonStart === -1) return [];
+      return JSON.parse(text.slice(jsonStart));
+    }
+    const err = new TextDecoder().decode(stderr);
+    if (!err.includes("locked") || attempt === retries - 1) throw new Error(err);
+    await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+  }
+  return [];
 }
 
 // ---------------------------------------------------------------------------

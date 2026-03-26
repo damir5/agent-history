@@ -125,6 +125,15 @@ async function collectAsync<T>(iter: AsyncIterable<T>, limit?: number): Promise<
   return results;
 }
 
+async function safeCollect<T>(name: string, fn: () => Promise<T[]>): Promise<T[]> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`Warning: ${name} failed: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+
 async function cmdSearch(args: ReturnType<typeof parseArgs>): Promise<void> {
   if (!args.query) {
     console.error("Error: --query is required for search");
@@ -134,7 +143,7 @@ async function cmdSearch(args: ReturnType<typeof parseArgs>): Promise<void> {
   const adapters = await getAdapters(filters.agent);
   const results: Message[] = [];
   for (const adapter of adapters) {
-    const msgs = await collectAsync(adapter.search(filters), filters.limit);
+    const msgs = await safeCollect(adapter.name, () => collectAsync(adapter.search(filters), filters.limit));
     results.push(...msgs);
   }
   results.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
@@ -147,7 +156,7 @@ async function cmdSessions(args: ReturnType<typeof parseArgs>): Promise<void> {
   const adapters = await getAdapters(filters.agent);
   const results: Session[] = [];
   for (const adapter of adapters) {
-    const sessions = await collectAsync(adapter.sessions(filters), filters.limit);
+    const sessions = await safeCollect(adapter.name, () => collectAsync(adapter.sessions(filters), filters.limit));
     results.push(...sessions);
   }
   results.sort((a, b) => b.startTime.localeCompare(a.startTime));
@@ -176,7 +185,11 @@ async function cmdStats(args: ReturnType<typeof parseArgs>): Promise<void> {
   const adapters = await getAdapters(filters.agent);
   const results: Stats[] = [];
   for (const adapter of adapters) {
-    results.push(await adapter.stats(filters));
+    try {
+      results.push(await adapter.stats(filters));
+    } catch (err) {
+      console.error(`Warning: ${adapter.name} stats failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   output(results, args.format ?? "json");
 }
@@ -186,7 +199,7 @@ async function cmdCorrections(args: ReturnType<typeof parseArgs>): Promise<void>
   const adapters = await getAdapters(filters.agent);
   const results: Correction[] = [];
   for (const adapter of adapters) {
-    const corrections = await collectAsync(adapter.corrections(filters), filters.limit);
+    const corrections = await safeCollect(adapter.name, () => collectAsync(adapter.corrections(filters), filters.limit));
     results.push(...corrections);
   }
   results.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
