@@ -80,8 +80,9 @@ function geminiDir(): string {
   return join(home(), ".gemini", "tmp");
 }
 
-function extractText(content: GeminiContent[]): string {
-  return content.map((c) => c.text).join("").trim();
+function extractText(content: GeminiContent[] | undefined): string {
+  if (!content || !Array.isArray(content)) return "";
+  return content.map((c) => c.text ?? "").join("").trim();
 }
 
 function pickModel(messages: GeminiMessage[]): string | undefined {

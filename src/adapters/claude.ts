@@ -50,10 +50,11 @@ function historyFile(): string {
 }
 
 /** Extract plain text from user or assistant message content */
-function extractText(content: string | ContentPart[]): string {
+function extractText(content: unknown): string {
   if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
   return content
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .filter((p): p is { type: "text"; text: string } => p?.type === "text" && typeof p?.text === "string")
     .map((p) => p.text)
     .join("\n")
     .trim();

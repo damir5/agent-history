@@ -316,6 +316,20 @@ export const codexAdapter: HistoryAdapter = {
       return { agent: AGENT, sessions: 0, messages: 0, projects: [], tokenUsage: 0, models: [] };
     }
 
+    // Count user messages from history.jsonl, applying date filter if set
+    let messages = 0;
+    for await (const raw of readLines(historyPath())) {
+      let line: HistoryLine;
+      try {
+        line = JSON.parse(raw) as HistoryLine;
+      } catch {
+        continue;
+      }
+      const timestamp = secToISO(line.ts);
+      if (!inDateRange(timestamp, filters)) continue;
+      messages++;
+    }
+
     // Apply project filter to project list
     let projects = cwdRows.map((r) => r.cwd);
     if (filters.project) {
@@ -331,7 +345,7 @@ export const codexAdapter: HistoryAdapter = {
     return {
       agent: AGENT,
       sessions: total?.cnt ?? 0,
-      messages: 0, // no per-message count in threads table
+      messages,
       projects,
       tokenUsage: total?.total_tokens ?? 0,
       models,
