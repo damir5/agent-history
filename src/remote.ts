@@ -1,4 +1,7 @@
 import { getDestination } from "./config.ts";
+import { runCommand } from "./process.ts";
+
+const REMOTE_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * Run agent-history subcommand on a remote machine via SSH.
@@ -12,26 +15,30 @@ export async function runRemote(
 
   if (dest.type === "local") {
     // Run locally with HOME pointing to destination's home
-    const cmd = new Deno.Command("agent-history", {
+    const { code } = await runCommand("agent-history", {
       args: subcommandArgs,
       env: { HOME: dest.home },
       stdout: "inherit",
       stderr: "inherit",
+      timeoutMs: REMOTE_TIMEOUT_MS,
+      label: "local remote agent-history command",
     });
-    const { code } = await cmd.output();
     Deno.exit(code);
   }
 
   // SSH execution
   const sshTarget = dest.user ? `${dest.user}@${dest.host}` : dest.host!;
-  const remoteCmd = ["agent-history", ...subcommandArgs].map(shellEscape).join(" ");
+  const remoteCmd = ["agent-history", ...subcommandArgs].map(shellEscape).join(
+    " ",
+  );
 
-  const cmd = new Deno.Command("ssh", {
+  const { code } = await runCommand("ssh", {
     args: ["-o", "BatchMode=yes", sshTarget, remoteCmd],
     stdout: "inherit",
     stderr: "inherit",
+    timeoutMs: REMOTE_TIMEOUT_MS,
+    label: "ssh remote agent-history command",
   });
-  const { code } = await cmd.output();
   Deno.exit(code);
 }
 

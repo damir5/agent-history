@@ -7,20 +7,23 @@ import type {
   Stats,
 } from "../types.ts";
 import { home, inDateRange, matchProject, secToISO } from "../filters.ts";
+import { runCommand } from "../process.ts";
 
 const AGENT = "codex" as const;
+const SQLITE_TIMEOUT_MS = 15_000;
 
 // ---------------------------------------------------------------------------
 // SQLite helper
 // ---------------------------------------------------------------------------
 
 async function querySqlite(dbPath: string, sql: string): Promise<unknown[]> {
-  const cmd = new Deno.Command("sqlite3", {
+  const { stdout, stderr, success } = await runCommand("sqlite3", {
     args: ["-json", "-readonly", dbPath, sql],
     stdout: "piped",
     stderr: "piped",
+    timeoutMs: SQLITE_TIMEOUT_MS,
+    label: "codex sqlite query",
   });
-  const { stdout, stderr, success } = await cmd.output();
   if (!success) throw new Error(new TextDecoder().decode(stderr));
   const text = new TextDecoder().decode(stdout).trim();
   if (!text) return [];
@@ -313,7 +316,14 @@ export const codexAdapter: HistoryAdapter = {
         "SELECT DISTINCT model FROM threads WHERE model IS NOT NULL AND model != ''",
       )) as typeof modelRows;
     } catch {
-      return { agent: AGENT, sessions: 0, messages: 0, projects: [], tokenUsage: 0, models: [] };
+      return {
+        agent: AGENT,
+        sessions: 0,
+        messages: 0,
+        projects: [],
+        tokenUsage: 0,
+        models: [],
+      };
     }
 
     // Count user messages from history.jsonl, applying date filter if set
@@ -379,7 +389,9 @@ export const codexAdapter: HistoryAdapter = {
       /\bdo\s+it\s+again\b/i,
     ];
 
-    function classifyReason(text: string): "explicit" | "interrupt" | "retry" | null {
+    function classifyReason(
+      text: string,
+    ): "explicit" | "interrupt" | "retry" | null {
       if (interruptPatterns.some((p) => p.test(text))) return "interrupt";
       if (retryPatterns.some((p) => p.test(text))) return "retry";
       if (explicitPatterns.some((p) => p.test(text))) return "explicit";

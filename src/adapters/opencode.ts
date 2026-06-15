@@ -1,29 +1,42 @@
-import type { Correction, Filters, HistoryAdapter, Message, Session, Stats } from "../types.ts";
+import type {
+  Correction,
+  Filters,
+  HistoryAdapter,
+  Message,
+  Session,
+  Stats,
+} from "../types.ts";
 import { home, inDateRange, matchProject, msToISO } from "../filters.ts";
-import * as path from "jsr:@std/path";
+import { runCommand } from "../process.ts";
+import * as path from "@std/path";
 
 const SQLITE3_BIN = "/usr/bin/sqlite3";
-const DB_PATH = () => path.join(home(), ".local", "share", "opencode", "opencode.db");
+const DB_PATH = () =>
+  path.join(home(), ".local", "share", "opencode", "opencode.db");
+const SQLITE_TIMEOUT_MS = 15_000;
 
 // ---------------------------------------------------------------------------
 // SQLite helper
 // ---------------------------------------------------------------------------
 
-async function querySqlite(dbPath: string, sql: string, retries = 3): Promise<unknown[]> {
+async function querySqlite(
+  dbPath: string,
+  sql: string,
+  retries = 3,
+): Promise<unknown[]> {
   for (let attempt = 0; attempt < retries; attempt++) {
     // Pass pragmas without -json via stdin, then the real query
-    const fullSql = `.mode json\nPRAGMA busy_timeout=2000;\nPRAGMA query_only=ON;\n${sql}\n`;
-    const cmd = new Deno.Command(SQLITE3_BIN, {
+    const fullSql =
+      `.mode json\nPRAGMA busy_timeout=2000;\nPRAGMA query_only=ON;\n${sql}\n`;
+    const { stdout, stderr, success } = await runCommand(SQLITE3_BIN, {
       args: ["-readonly", "-batch", dbPath],
       stdin: "piped",
       stdout: "piped",
       stderr: "piped",
+      stdinText: fullSql,
+      timeoutMs: SQLITE_TIMEOUT_MS,
+      label: "opencode sqlite query",
     });
-    const proc = cmd.spawn();
-    const writer = proc.stdin.getWriter();
-    await writer.write(new TextEncoder().encode(fullSql));
-    await writer.close();
-    const { stdout, stderr, success } = await proc.output();
     if (success) {
       const text = new TextDecoder().decode(stdout).trim();
       if (!text) return [];
@@ -33,7 +46,9 @@ async function querySqlite(dbPath: string, sql: string, retries = 3): Promise<un
       return JSON.parse(text.slice(jsonStart));
     }
     const err = new TextDecoder().decode(stderr);
-    if (!err.includes("locked") || attempt === retries - 1) throw new Error(err);
+    if (!err.includes("locked") || attempt === retries - 1) {
+      throw new Error(err);
+    }
     await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
   }
   return [];
@@ -151,7 +166,9 @@ export const opencodeAdapter: HistoryAdapter = {
     let count = 0;
 
     for (const row of rows) {
-      if (filters.project && !matchProject(row.directory, filters.project)) continue;
+      if (filters.project && !matchProject(row.directory, filters.project)) {
+        continue;
+      }
 
       const text = extractText(row.parts);
       if (!text) continue;
@@ -207,7 +224,9 @@ export const opencodeAdapter: HistoryAdapter = {
     const rows = (await querySqlite(db, sql)) as RawSession[];
 
     for (const row of rows) {
-      if (filters.project && !matchProject(row.directory, filters.project)) continue;
+      if (filters.project && !matchProject(row.directory, filters.project)) {
+        continue;
+      }
 
       const startTime = msToISO(row.time_created);
       if (!inDateRange(startTime, filters)) continue;
@@ -231,7 +250,9 @@ export const opencodeAdapter: HistoryAdapter = {
     // Fetch session directory for the project field
     const sessionRows = (await querySqlite(
       db,
-      `SELECT directory FROM session WHERE id = '${sessionId.replace(/'/g, "''")}'`,
+      `SELECT directory FROM session WHERE id = '${
+        sessionId.replace(/'/g, "''")
+      }'`,
     )) as Array<{ directory: string }>;
     const project = sessionRows[0]?.directory ?? "";
 
@@ -312,17 +333,27 @@ export const opencodeAdapter: HistoryAdapter = {
     `;
 
     const [sessionResult, msgResult] = await Promise.all([
-      querySqlite(db, sessionSql) as Promise<Array<{ cnt: number; dirs: string | null }>>,
-      querySqlite(db, msgSql) as Promise<Array<{ cnt: number; tokens: number | null; models: string | null }>>,
+      querySqlite(db, sessionSql) as Promise<
+        Array<{ cnt: number; dirs: string | null }>
+      >,
+      querySqlite(db, msgSql) as Promise<
+        Array<{ cnt: number; tokens: number | null; models: string | null }>
+      >,
     ]);
 
     const sessionRow = sessionResult[0] ?? { cnt: 0, dirs: null };
     const msgRow = msgResult[0] ?? { cnt: 0, tokens: null, models: null };
 
-    let projects = sessionRow.dirs ? sessionRow.dirs.split(",").filter(Boolean) : [];
-    if (filters.project) projects = projects.filter((p) => matchProject(p, filters.project!));
+    let projects = sessionRow.dirs
+      ? sessionRow.dirs.split(",").filter(Boolean)
+      : [];
+    if (filters.project) {
+      projects = projects.filter((p) => matchProject(p, filters.project!));
+    }
 
-    const models = msgRow.models ? msgRow.models.split(",").filter(Boolean) : [];
+    const models = msgRow.models
+      ? msgRow.models.split(",").filter(Boolean)
+      : [];
 
     const stats: Stats = {
       agent: "opencode",
@@ -331,7 +362,9 @@ export const opencodeAdapter: HistoryAdapter = {
       projects,
       models,
     };
-    if (msgRow.tokens != null && msgRow.tokens > 0) stats.tokenUsage = msgRow.tokens;
+    if (msgRow.tokens != null && msgRow.tokens > 0) {
+      stats.tokenUsage = msgRow.tokens;
+    }
     return stats;
   },
 
@@ -414,7 +447,9 @@ export const opencodeAdapter: HistoryAdapter = {
         // Build context: up to 3 preceding messages
         const idx = allMsgs.findIndex((m) => m.id === userMsg.id);
         const contextMsgs = allMsgs.slice(Math.max(0, idx - 3), idx);
-        const context = contextMsgs.map((m) => textMap.get(m.id) ?? "").filter(Boolean);
+        const context = contextMsgs.map((m) => textMap.get(m.id) ?? "").filter(
+          Boolean,
+        );
 
         yield {
           agent: "opencode",
